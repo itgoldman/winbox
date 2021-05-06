@@ -14,6 +14,7 @@ import { addListener, removeListener, setStyle, setText, getByClass, addClass, r
 const use_raf = false;
 const doc = document.documentElement;
 const stack_min = [];
+
 let id_counter = 0;
 let index;
 let is_fullscreen;
@@ -31,7 +32,7 @@ let root_w, root_h;
 
 function WinBox(params, _title){
 
-    if(!(this instanceof WinBox)) {
+    if(!(this instanceof WinBox)){
 
         return new WinBox(params);
     }
@@ -64,9 +65,13 @@ function WinBox(params, _title){
         onresize,
         background,
         border,
-        classname;
+        classname,
+        limitless,
+        keep_ratio,
+        body_drag,
+        header_height;
 
-    if(params){
+    if(params || params == ""){
 
         if(_title){
 
@@ -109,6 +114,10 @@ function WinBox(params, _title){
             background = params["background"];
             border = params["border"];
             classname = params["class"];
+            limitless = params["limitless"];
+            keep_ratio = params["keep_ratio"];
+            body_drag = params["body_drag"];
+            header_height = params["header_height"];
 
             if(background){
 
@@ -119,6 +128,7 @@ function WinBox(params, _title){
 
                 setStyle(this.body, "margin", border + (isNaN(border) ? "" : "px"));
             }
+
         }
     }
 
@@ -144,9 +154,9 @@ function WinBox(params, _title){
     index = index || 10;
 
     this.dom.id =
-    this.id = id || ("winbox-" + (++id_counter));
+        this.id = id || ("winbox-" + (++id_counter));
     this.dom.className = "winbox" + (classname ? " " + (typeof classname === "string" ? classname : classname.join(" ")) : "") +
-                                    (modal ? " modal" : "");
+        (modal ? " modal" : "");
     this.x = x;
     this.y = y;
     this.width = width;
@@ -165,6 +175,12 @@ function WinBox(params, _title){
     this.onblur = onblur;
     this.onmove = onmove;
     this.onresize = onresize;
+
+    this.limitless = limitless;
+    this.keep_ratio = keep_ratio;
+    this.body_drag = body_drag;
+    this.header_height = header_height || header_height == 0 ? header_height : 35;
+
 
     if(max){
 
@@ -244,16 +260,16 @@ function setup(){
     const body = document.body;
 
     body[prefix_request = "requestFullscreen"] ||
-    body[prefix_request = "msRequestFullscreen"] ||
-    body[prefix_request = "webkitRequestFullscreen"] ||
-    body[prefix_request = "mozRequestFullscreen"] ||
-    (prefix_request = "");
+        body[prefix_request = "msRequestFullscreen"] ||
+        body[prefix_request = "webkitRequestFullscreen"] ||
+        body[prefix_request = "mozRequestFullscreen"] ||
+        (prefix_request = "");
 
     prefix_exit = prefix_request && (
 
         prefix_request.replace("request", "exit")
-                      .replace("mozRequest", "mozCancel")
-                      .replace("Request", "Exit")
+            .replace("mozRequest", "mozCancel")
+            .replace("Request", "Exit")
     );
 
     addListener(window, "resize", function(){
@@ -272,6 +288,9 @@ function setup(){
 function register(self){
 
     addWindowListener(self, "title");
+    if(self.body_drag){
+        addWindowListener(self, "body");
+    }
     addWindowListener(self, "n");
     addWindowListener(self, "s");
     addWindowListener(self, "w");
@@ -310,13 +329,13 @@ function register(self){
 
         preventEvent(event);
         var is_cancel = self.close();
-        if (is_cancel) {
+        if(is_cancel){
             return;
         }
         self = null;
     });
 
-    addListener(self.dom, "click", function(event){
+    addListener(self.dom, "mousedown", function(event){
 
         // stop propagation would disable global listeners used inside window contents
         self.focus();
@@ -341,12 +360,12 @@ function update_min_stack(){
 
     const len = stack_min.length;
 
-    for(let i = 0, self, width; i < len; i++){
+    for (let i = 0, self, width; i < len; i++){
 
         self = stack_min[i];
         width = Math.min((root_w - self.left * 2) / len, 250);
-        self.resize((width + 1) | 0, 35, true)
-            .move((self.left + i * width) | 0, root_h - self.bottom - 35, true);
+        self.resize((width + 1) | 0, self.header_height, true)
+            .move((self.left + i * width) | 0, root_h - self.bottom - self.header_height, true);
     }
 }
 
@@ -378,9 +397,10 @@ function addWindowListener(self, dir){
 
     const node = getByClass(self.dom, "wb-" + dir);
     let touch, x, y;
+    var drag_initiated = false;
 
-    addListener(node, "mousedown", mousedown);
-    addListener(node, "touchstart", mousedown, { "passive": false });
+    addListener(node, "mousedown", handler_mousedown);
+    addListener(node, "touchstart", handler_mousedown, { "passive": false });
 
     let raf, raf_move, raf_resize;
 
@@ -401,22 +421,40 @@ function addWindowListener(self, dir){
         }
     }
 
-    function mousedown(event){
 
-        // prevent the full iteration through the fallback chain of a touch event (touch > mouse > click)
-        preventEvent(event, true);
+    function handler_mousedown(event){
+        if(event.which && event.which != 1){
+            return;
+        }
+
+        var tagName = event.target.tagName;
+        if(tagName == "A" || tagName == "INPUT" || tagName == "BUTTON" || tagName == "TEXTAREA" || tagName == "SELECT"){
+            return;
+        }
 
         if(self.min){
 
             remove_min_stack(self);
             self.resize().move().focus();
+            if(self.was_max){
+                self.maximize();
+                delete self.was_max;
+            }
+
         }
         else /*if(!self.min && !self.max)*/ { // already disabled by css
+
+            drag_initiated = true;
+
 
             disable_animation(self);
             use_raf && loop();
 
             if((touch = event.touches) && (touch = touch[0])){
+
+                // prevent the full iteration through the fallback chain of a touch event (touch > mouse > click)
+                preventEvent(event, true);
+
 
                 event = touch;
 
@@ -445,6 +483,9 @@ function addWindowListener(self, dir){
     }
 
     function handler_mousemove(event){
+        if(!drag_initiated){
+            return;
+        }
 
         preventEvent(event);
 
@@ -455,18 +496,56 @@ function addWindowListener(self, dir){
 
         const pageX = event.pageX;
         const pageY = event.pageY;
-        const offsetX = pageX - x;
-        const offsetY = pageY - y;
+        var offsetX = pageX - x;
+        var offsetY = pageY - y;
+        const min_width = 150;
+        const min_height = self.header_height;
+
+        const old_x = self.x;
+        const old_y = self.y;
+        const old_width = self.width;
+        const old_height = self.height;
+        const ratio = self.width / (self.height - self.header_height);       // body ratio
 
         let resize_w, resize_h, move_x, move_y;
 
-        if(dir === "title"){
 
+        if(dir === "title" || dir === "body"){
             self.x += offsetX;
             self.y += offsetY;
             move_x = move_y = 1;
         }
         else{
+
+            if(self.keep_ratio){
+                if(dir === "se" || dir === "nw"){
+                    offsetY = offsetX / ratio
+                }
+                if(dir === "sw" || dir === "ne"){
+                    offsetY = -offsetX / ratio
+                }
+                if(dir === "e"){
+                    offsetY = offsetX / ratio
+                    self.height += offsetY;
+                }
+                if(dir === "w"){
+                    offsetY = -offsetX / ratio
+                    self.height += offsetY;
+                }
+                if(dir === "n"){
+                    offsetX = -offsetY * ratio
+                    self.width += offsetX;
+                }
+                if(dir === "s"){
+                    offsetX = offsetY * ratio
+                    self.width += offsetX;
+                }
+
+                resize_h = 1;
+                resize_w = 1;
+
+            }
+
 
             if(dir === "e" || dir === "se" || dir === "ne"){
 
@@ -497,29 +576,42 @@ function addWindowListener(self, dir){
 
         if(resize_w || resize_h){
 
-            if(resize_w){
 
-                self.width = Math.max(Math.min(self.width, root_w - self.x - self.right), 150);
+            if(resize_w && !self.limitless){
+
+                self.width = Math.max(Math.min(self.width, root_w - self.x - self.right), self.left);
             }
 
-            if(resize_h){
+            if(resize_h && !self.limitless){
 
-                self.height = Math.max(Math.min(self.height, root_h - self.y - self.bottom /* - 1 */), 35);
+                self.height = Math.max(Math.min(self.height, root_h - self.y - self.bottom), header_height);
             }
+
+
+            var epsilon = 0.000001;
+            var is_ratio_error = self.keep_ratio && (Math.abs(self.width / (self.height - self.header_height) - ratio) > epsilon)
+            if(self.width < min_width || self.height < min_height || is_ratio_error){
+                self.height = old_height;
+                self.width = old_width;
+                self.x = old_x;
+                self.y = old_y;
+                move_x = move_y = 0;
+            }
+
 
             use_raf ? raf_resize = true : self.resize();
         }
 
         if(move_x || move_y){
 
-            if(move_x){
+            if(move_x && !self.limitless){
 
                 self.x = Math.max(Math.min(self.x, root_w - self.width - self.right), self.left);
             }
 
-            if(move_y){
+            if(move_y && !self.limitless){
 
-                self.y = Math.max(Math.min(self.y, root_h - self.height - self.bottom /* - 1 */), self.top);
+                self.y = Math.max(Math.min(self.y, root_h - self.height - self.bottom), self.top);
             }
 
             use_raf ? raf_move = true : self.move();
@@ -530,6 +622,8 @@ function addWindowListener(self, dir){
     }
 
     function handler_mouseup(event){
+
+        drag_initiated = false;
 
         preventEvent(event);
         enable_animation(self);
@@ -646,13 +740,28 @@ WinBox.prototype.focus = function(){
 
         if(last_focus){
 
-            last_focus.removeClass("focus");
-            last_focus.onblur && last_focus.onblur();
+            last_focus.blur();
         }
 
         last_focus = this;
         this.onfocus && this.onfocus();
     }
+
+    return this;
+};
+
+/**
+ * @this WinBox
+ */
+
+WinBox.prototype.blur = function(){
+    if(last_focus === this){
+        last_focus = null;
+    }
+
+    this.removeClass("focus");
+    this.onblur && this.onblur();
+
 
     return this;
 };
@@ -687,9 +796,11 @@ WinBox.prototype.minimize = function(state){
         cancel_fullscreen(this);
     }
 
+
     if(!state && this.min){
 
         remove_min_stack(this);
+
         this.resize().move();
     }
     else if((state !== false) && !this.min){
@@ -699,12 +810,16 @@ WinBox.prototype.minimize = function(state){
         this.dom.title = this.title;
         this.addClass("min");
         this.min = true;
+
+        this.blur();
+
     }
 
     if(this.max){
 
         this.removeClass("max");
         this.max = false;
+        this.was_max = true;
     }
 
     return this;
@@ -821,10 +936,10 @@ function cancel_fullscreen(self){
  * @this WinBox
  */
 
-WinBox.prototype.close = function(is_immediate = false) {
+WinBox.prototype.close = function(is_immediate = false){
 
-    if (this.onclose && !is_immediate) {
-        if (this.onclose()) {
+    if(this.onclose && !is_immediate){
+        if(this.onclose()){
             // cancel close
             return true;
         }
