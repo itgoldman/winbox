@@ -584,7 +584,7 @@ function addWindowListener(self, dir){
 
             if(resize_h && !self.limitless){
 
-                self.height = Math.max(Math.min(self.height, root_h - self.y - self.bottom), header_height);
+                self.height = Math.max(Math.min(self.height, root_h - self.y - self.bottom), self.header_height);
             }
 
 
